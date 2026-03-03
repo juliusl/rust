@@ -98,6 +98,35 @@ pub struct MOUNT_POINT_REPARSE_BUFFER {
 #[cfg(not(target_vendor = "uwp"))]
 pub const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
 
+// FILE_INFO_BY_NAME_CLASS enum for GetFileInformationByName (>= Win11 24H2)
+pub type FILE_INFO_BY_NAME_CLASS = i32;
+pub const FileStatByNameInfo: FILE_INFO_BY_NAME_CLASS = 0;
+pub const FileStatLxByNameInfo: FILE_INFO_BY_NAME_CLASS = 1;
+pub const FileCaseSensitiveByNameInfo: FILE_INFO_BY_NAME_CLASS = 2;
+pub const FileStatBasicByNameInfo: FILE_INFO_BY_NAME_CLASS = 3;
+
+// FILE_STAT_BASIC_INFORMATION for GetFileInformationByName (>= Win11 24H2)
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct FILE_STAT_BASIC_INFORMATION {
+    pub FileId: i64,
+    pub CreationTime: i64,
+    pub LastAccessTime: i64,
+    pub LastWriteTime: i64,
+    pub ChangeTime: i64,
+    pub AllocationSize: i64,
+    pub EndOfFile: i64,
+    pub FileAttributes: u32,
+    pub ReparseTag: u32,
+    pub NumberOfLinks: u32,
+    pub DeviceType: u32,
+    pub DeviceCharacteristics: u32,
+    pub Reserved: u32,
+    pub VolumeSerialNumber: i64,
+    // FILE_ID_128
+    pub FileId128: [u8; 16],
+}
+
 // Use raw-dylib to import ProcessPrng as we can't rely on there being an import library.
 #[cfg(not(target_vendor = "win7"))]
 #[cfg_attr(
@@ -154,6 +183,17 @@ compat_fn_with_fallback! {
     // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppath2a
     pub fn GetTempPath2W(bufferlength: u32, buffer: PWSTR) -> u32 {
         unsafe {  GetTempPathW(bufferlength, buffer) }
+    }
+
+    // >= Win11 24H2 (build 26100)
+    // https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-getfileinformationbyname
+    pub fn GetFileInformationByName(
+        filename: PCWSTR,
+        fileinformationclass: FILE_INFO_BY_NAME_CLASS,
+        fileinfobuffer: *mut c_void,
+        fileinfobuffersize: u32
+    ) -> BOOL {
+        unsafe { SetLastError(ERROR_CALL_NOT_IMPLEMENTED as u32); FALSE }
     }
 }
 

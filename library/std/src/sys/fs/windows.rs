@@ -1488,6 +1488,12 @@ impl ReparsePoint {
 }
 
 fn metadata(path: &WCStr, reparse: ReparsePoint) -> io::Result<FileAttr> {
+    // Try the fast path using GetFileInformationByName (Win11 24H2+).
+    // This avoids opening a file handle entirely.
+    if let Some(result) = stat_by_name(path, reparse) {
+        return result;
+    }
+
     let mut opts = OpenOptions::new();
     // No read or write permissions are necessary
     opts.access_mode(0);
@@ -1544,6 +1550,82 @@ fn metadata(path: &WCStr, reparse: ReparsePoint) -> io::Result<FileAttr> {
             }
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Try to get file metadata using `GetFileInformationByName` (Win11 24H2+).
+///
+/// This API retrieves metadata by path without opening a file handle, which
+/// is faster and also returns `ChangeTime` in a single call.
+///
+/// Returns `None` if the API is unavailable (older Windows or unsupported
+/// filesystem like FAT32), in which case the caller should use the
+/// handle-based fallback. Returns `Some(Err(...))` for real errors
+/// (e.g. file not found).
+fn stat_by_name(path: &WCStr, reparse: ReparsePoint) -> Option<io::Result<FileAttr>> {
+    unsafe {
+        let mut info: c::FILE_STAT_BASIC_INFORMATION = mem::zeroed();
+        let result = c::GetFileInformationByName(
+            path.as_ptr(),
+            c::FileStatBasicByNameInfo,
+            (&raw mut info).cast(),
+            size_of::<c::FILE_STAT_BASIC_INFORMATION>() as u32,
+        );
+        if result == c::FALSE {
+            let err = api::get_last_error();
+            return match err {
+                // API not available or unsupported on this filesystem (e.g. FAT32).
+                // The compat_fn_with_fallback macro already caches the function
+                // pointer lookup, so ERROR_CALL_NOT_IMPLEMENTED will be fast after
+                // the first call. ERROR_NOT_SUPPORTED can vary per-volume so we
+                // must not cache it globally.
+                WinError::CALL_NOT_IMPLEMENTED
+                | WinError::INVALID_PARAMETER
+                | WinError::NOT_SUPPORTED => None,
+                _ => Some(Err(io::Error::from_raw_os_error(err.code as i32))),
+            };
+        }
+
+        // GetFileInformationByName does not follow symlinks.
+        // If we need to follow and this is a name surrogate reparse point,
+        // fall back to the handle-based approach which resolves symlinks.
+        if reparse == ReparsePoint::Follow
+            && info.FileAttributes & c::FILE_ATTRIBUTE_REPARSE_POINT != 0
+            && info.ReparseTag & 0x20000000 != 0
+        {
+            return None;
+        }
+
+        let reparse_tag = if info.FileAttributes & c::FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            info.ReparseTag
+        } else {
+            0
+        };
+
+        Some(Ok(FileAttr {
+            attributes: info.FileAttributes,
+            creation_time: c::FILETIME {
+                dwLowDateTime: info.CreationTime as u32,
+                dwHighDateTime: (info.CreationTime >> 32) as u32,
+            },
+            last_access_time: c::FILETIME {
+                dwLowDateTime: info.LastAccessTime as u32,
+                dwHighDateTime: (info.LastAccessTime >> 32) as u32,
+            },
+            last_write_time: c::FILETIME {
+                dwLowDateTime: info.LastWriteTime as u32,
+                dwHighDateTime: (info.LastWriteTime >> 32) as u32,
+            },
+            change_time: Some(c::FILETIME {
+                dwLowDateTime: info.ChangeTime as u32,
+                dwHighDateTime: (info.ChangeTime >> 32) as u32,
+            }),
+            file_size: info.EndOfFile as u64,
+            reparse_tag,
+            volume_serial_number: Some(info.VolumeSerialNumber as u32),
+            number_of_links: Some(info.NumberOfLinks),
+            file_index: Some(info.FileId as u64),
+        }))
     }
 }
 

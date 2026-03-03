@@ -274,6 +274,7 @@ impl WinError {
     pub const ALREADY_EXISTS: Self = Self::new(c::ERROR_ALREADY_EXISTS);
     pub const BAD_NETPATH: Self = Self::new(c::ERROR_BAD_NETPATH);
     pub const BAD_NET_NAME: Self = Self::new(c::ERROR_BAD_NET_NAME);
+    pub const CALL_NOT_IMPLEMENTED: Self = Self::new(c::ERROR_CALL_NOT_IMPLEMENTED);
     pub const CANT_ACCESS_FILE: Self = Self::new(c::ERROR_CANT_ACCESS_FILE);
     pub const DELETE_PENDING: Self = Self::new(c::ERROR_DELETE_PENDING);
     pub const DIRECTORY: Self = Self::new(c::ERROR_DIRECTORY);
